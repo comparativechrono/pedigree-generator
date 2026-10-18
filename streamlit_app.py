@@ -7,7 +7,7 @@ st.title('Pedigree Generator')
 #sliders, buttons, and select boxes
 st.text_input("Family ID", key='FamilyID')
 max_children = st.slider(label= 'Max Children',
-                         min_value= 0,
+                         min_value= 1,
                          max_value= 10,
                          value= 3,
                          help= 'The maximum number of children each spousal pair can have')
@@ -19,23 +19,23 @@ mode = st.selectbox(label= 'Mode of Inheritance',
                     help= 'The mode of inheritence dictating the phenotype inheritance pattern')
 
 generation_count = st.slider(label= 'Number of Generations',
-                             min_value= 0,
+                             min_value= 1,
                              max_value= 10,
                              value= 3)
 AffectedSpouse = st.checkbox(label = 'Affected Secondary Founders',
-                             help= 'Write up later')
+                             help= 'Whether the partners who marry into the family can carry the alternate allele')
 if AffectedSpouse:
     alt_freq = st.slider(label= 'Alternate Allele Frequency',
                          min_value=0.01,
                          max_value=1.00,
                          step=0.01,
                          value= 0.10,
-                         help='Type up later')
+                         help='How common the alternate allele is in the population that partners come from')
 else:
     alt_freq = 0
 
 AdvancedSettings = st.toggle(label = 'Advanced Settings',
-                             help= 'Write up later')
+                             help= 'Set how often partners have parents in the pedigree, and how often children have partners')
 if AdvancedSettings:
     BackpropLikelihood = st.slider(label= 'Ancestry Backprop Likelihood',
                                    min_value= 0.0,
@@ -71,7 +71,7 @@ st.dataframe(
         'FamilyID': 'Family ID', 
         'IndividualID': 'ID', 
         'PaternalID': 'Paternal ID', 
-        'MaternalID': 'Paternal ID',
+        'MaternalID': 'Maternal ID',
     }
 )
 
