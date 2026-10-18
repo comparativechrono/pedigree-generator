@@ -1,0 +1,34 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - python-version: "3.9"
+            graphviz: false
+          - python-version: "3.13"
+            graphviz: false
+          - python-version: "3.13"
+            graphviz: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install Graphviz
+        if: matrix.graphviz
+        run: sudo apt-get update && sudo apt-get install -y graphviz libgraphviz-dev
+      - name: Install PedGen
+        run: pip install ".[test${{ matrix.graphviz && ',graphviz' || '' }}]"
+      - name: Run the tests
+        run: pytest

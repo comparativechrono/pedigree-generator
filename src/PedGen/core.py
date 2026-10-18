@@ -1,8 +1,28 @@
+import os
 import random
+from collections import deque
 import pandas as pd
 import matplotlib.pyplot as plt
 import networkx as nx
-from networkx.drawing.nx_agraph import graphviz_layout 
+
+def no_parent(parent_id):
+    '''
+    Whether a parent ID means that the parent isn't in the pedigree: 0, however it was read (0, 0.0 or '0'), or a missing value
+    '''
+    if parent_id is None:
+        return True
+    try:
+        if pd.isna(parent_id):
+            return True
+    except (TypeError, ValueError):
+        pass
+    text = str(parent_id).strip()
+    if text == '':
+        return True
+    try:
+        return float(text) == 0
+    except ValueError:
+        return False
 
 def construct_pedigree_graph(df):
     G = nx.DiGraph()
@@ -15,32 +35,109 @@ def construct_pedigree_graph(df):
                   phenotype=row['Phenotype'])
 
     for _, row in df.iterrows():
-        # Ensure PaternalID and MaternalID are compared to string '0' if they are strings
         paternal_id = row['PaternalID']
         maternal_id = row['MaternalID']
         individual_id = row['IndividualID']
 
-        if paternal_id != 0:
+        # a parent of 0 means unknown, whether it was read as a whole number, a decimal or text
+        if not no_parent(paternal_id):
             G.add_edge(paternal_id, individual_id)
-        if maternal_id != 0:
+        if not no_parent(maternal_id):
             G.add_edge(maternal_id, individual_id)
 
     return G
+
+def generations(G):
+    '''
+    Each person's generation in a pedigree graph, counting from 0 for the oldest.
+    A child is one generation below its parents, so partners share a generation, and someone who married into the family
+    is in their partner's generation, however many of their own ancestors are drawn. Where that can't hold throughout,
+    as when people of different generations have children together, each child is put one generation below its lower
+    parent, and each person with no parents in the pedigree one generation above their highest child.
+    '''
+    generation = {}
+    order = list(nx.topological_sort(G))
+    for component in nx.weakly_connected_components(G):
+        people = [n for n in order if n in component]
+        # spreading out from one person to the whole family, a child one generation below a parent and a parent one above a child
+        level = {people[0]: 0}
+        queue = deque([people[0]])
+        consistent = True
+        while queue:
+            n = queue.popleft()
+            for neighbour, step in [(c, 1) for c in G.successors(n)] + [(p, -1) for p in G.predecessors(n)]:
+                if neighbour not in level:
+                    level[neighbour] = level[n] + step
+                    queue.append(neighbour)
+                elif level[neighbour] != level[n] + step:
+                    consistent = False
+        if not consistent:
+            level = {}
+            for n in people:
+                parents = list(G.predecessors(n))
+                level[n] = max(level[p] for p in parents) + 1 if parents else 0
+            for n in people:
+                children = list(G.successors(n))
+                if not list(G.predecessors(n)) and children:
+                    level[n] = min(level[c] for c in children) - 1
+        oldest = min(level.values())
+        for n, l in level.items():
+            generation[n] = l - oldest
+    return generation
+
+def generation_layout(G):
+    '''
+    Positions for drawing a pedigree graph without Graphviz: one row per generation (see generations()), the oldest at the top,
+    so that partners are drawn side by side.
+    '''
+    generation = generations(G)
+    rows = {}
+    for n in G.nodes:
+        rows.setdefault(generation[n], []).append(n)
+    if not rows:
+        return {}
+    levels = sorted(rows)
+    # order each row by the average position of the people it's joined to in the row above, then below,
+    # a few times over, so that fewer lines cross (the barycentre method)
+    place = {n: i for row in rows.values() for i, n in enumerate(row)}
+    for _ in range(4):
+        for sweep in (levels[1:], levels[-2::-1]):
+            for level in sweep:
+                def barycentre(n):
+                    linked = [m for m in nx.all_neighbors(G, n) if generation[m] != level]
+                    return sum(place[m] for m in linked) / len(linked) if linked else place[n]
+                rows[level].sort(key=barycentre)
+                for i, n in enumerate(rows[level]):
+                    place[n] = i
+    widest = max(len(row) for row in rows.values())
+    pos = {}
+    for level, row in rows.items():
+        offset = (widest - len(row)) / 2
+        for i, n in enumerate(row):
+            pos[n] = (offset + i, -level)
+    return pos
 
 def plot_pedigree_tree(df, title="Pedigree (Tree Layout)"):
     G = construct_pedigree_graph(df)
     fig_size = (10, 5)
     f = plt.figure(figsize=fig_size)
 
-    pos = graphviz_layout(G, prog='dot')  # 'dot' gives top-down DAG style
-        
+    try:
+        from networkx.drawing.nx_agraph import graphviz_layout
+        pos = graphviz_layout(G, prog='dot')  # 'dot' gives top-down DAG style
+    except ImportError:
+        # PyGraphviz isn't installed (it needs Graphviz itself): draw one row per generation instead
+        pos = generation_layout(G)
+
     #Separating nodes by sex
     males = [n for n in G.nodes if G.nodes[n].get('sex') == 1]
     females = [n for n in G.nodes if G.nodes[n].get('sex') == 2]
+    unknown = [n for n in G.nodes if G.nodes[n].get('sex') not in (1, 2)]
 
     #Coloring nodes based on phenotype
     male_colors = ['red' if G.nodes[n].get('phenotype') == 2 else 'lightblue' for n in males]
     female_colors = ['red' if G.nodes[n].get('phenotype') == 2 else 'lightblue' for n in females]
+    unknown_colors = ['red' if G.nodes[n].get('phenotype') == 2 else 'lightblue' for n in unknown]
 
     #Draw edges
     nx.draw_networkx_edges(G, pos, arrows=True)
@@ -48,6 +145,8 @@ def plot_pedigree_tree(df, title="Pedigree (Tree Layout)"):
     #Draw nodes
     nx.draw_networkx_nodes(G, pos, nodelist=males, node_shape='s', node_color=male_colors, label='Male')
     nx.draw_networkx_nodes(G, pos, nodelist=females, node_shape='o', node_color=female_colors, label='Female')
+    if unknown:
+        nx.draw_networkx_nodes(G, pos, nodelist=unknown, node_shape='d', node_color=unknown_colors, label='Unknown sex')
     
     #Add labels
     nx.draw_networkx_labels(G, pos)
@@ -59,7 +158,31 @@ def plot_pedigree_tree(df, title="Pedigree (Tree Layout)"):
     return f
 
 
-def pedigree_generator(max_children, FamilyID, mode, generation_count, SpouseLikelihood=0.6, AffectedSpouse= True, BackpropLikelihood= 0.25, alt_freq= 0.1):
+def pedigree_generator(max_children, FamilyID, mode, generation_count, SpouseLikelihood=0.6, AffectedSpouse= True, BackpropLikelihood= 0.25, alt_freq= 0.1, seed= None):
+        '''
+        Generates a pedigree by Mendelian inheritance from an affected founder, with partners and their
+        ancestors drawn from a population in Hardy-Weinberg equilibrium.
+
+        PARAMETERS:
+        -----------
+        max_children (int): the most children a couple can have (at least 1)
+        FamilyID (string): the family's id in the pedigree
+        mode ('AD' or 'AR'): autosomal dominant or autosomal recessive
+        generation_count (int): the number of generations
+        SpouseLikelihood (float, 0-1): the chance that a child has a partner, and so children of their own (the first child always does)
+        AffectedSpouse (bool): whether partners can carry the alternate allele
+        BackpropLikelihood (float, 0-1): the chance that a partner's parents are added, and theirs, and so on
+        alt_freq (float, 0-1): the frequency of the alternate allele in the population
+        seed (int, optional): makes the pedigree reproducible: the same seed and settings always give the same pedigree.
+            Without a seed, Python's shared random number generator is used, as before.
+
+        RETURN:
+        -------
+        DataFrame with one row per person: FamilyID, IndividualID, PaternalID, MaternalID, Sex (1 male, 2 female),
+        Phenotype (1 unaffected, 2 affected) and Genotype (the number of alternate alleles)
+        '''
+        random = _random_source(seed)
+
         #-------------------------------------------
         # Helper Functions for Pedigree Propigation
         #-------------------------------------------
@@ -85,56 +208,7 @@ def pedigree_generator(max_children, FamilyID, mode, generation_count, SpouseLik
             return phenotype
 
         def calc_inheritance_weights(p,q):
-
-            tt = q**4
-            to = 2*p*(q**3)
-            tz = (p**2)*(q**2)
-            oo = 4*(p**2)*(q**2)
-            oz = 2*(p**3)*(q)
-            zz = p**4
-
-            homoRef = p**2
-            hetero = 2*p*q
-            homoAlt = q**2
-
-            inheritance_patterns = {
-                'forward_genotypes': {
-                #(paternal genotype, maternal genotype) -> [possible child genotypes]
-                    (2,2): [2],
-                    (2,1): [2,1],
-                    (1,2): [2,1],
-                    (2,0): [1],
-                    (0,2): [1],
-                    (1,1): [2,1,0],
-                    (0,1): [1,0],
-                    (1,0): [1,0],
-                    (0,0): [0]
-                },
-                'forward_weights': {
-                    (2,2): [1],
-                    (2,1): [1,1],
-                    (1,2): [1,1],
-                    (2,0): [1],
-                    (0,2): [1],
-                    (1,1): [1,2,1],
-                    (0,1): [1,1],
-                    (1,0): [1,1],
-                    (0,0): [1]
-                },
-                #child genotype -> [possible (paternal,maternal) genotypes]
-                'reverse_genotypes': {
-                    2: [(2,2),(2,1),(1,2),(1,1)],
-                    1: [(2,1),(1,2),(2,0),(0,2),(1,1),(1,0),(0,1)],
-                    0: [(1,0),(0,1),(0,0)]
-                },
-                'reverse_weights': {
-                    2: [homoAlt**2, homoAlt*hetero, hetero*homoAlt, hetero**2],
-                    1: [homoAlt*hetero, hetero*homoAlt, homoAlt*homoRef, homoRef*homoAlt, hetero**2, hetero*homoRef, homoRef*hetero],
-                    0: [hetero*homoRef, homoRef*hetero, homoRef**2]
-                }
-            }
-
-            return inheritance_patterns
+            return inheritance_weights(p, q)
 
         '''
         Wrapper function that generates the primary founder of the pedigree
@@ -305,9 +379,59 @@ def pedigree_generator(max_children, FamilyID, mode, generation_count, SpouseLik
         return family_df
 
 def gen_PED_export(ped_df, output_dir='.'):
-    pedfile = ped_df.to_csv(f'{output_dir}/{ped_df.iloc["FamilyID"][0]}.ped',
-                            columns= ['FamilyID', 'IndividualID', 'PaternalID', 'MaternalID', 'Sex', 'Phenotype'],
-                            header= False,
-                            index= False,
-                            sep= '\t',
-                            )
+    '''
+    Writes the pedigree as a PED file named after its family, 'FamilyID'.ped, in output_dir, and returns the file's path.
+    '''
+    family_id = ped_df['FamilyID'].iloc[0]
+    os.makedirs(output_dir, exist_ok= True)
+    path = os.path.join(output_dir, f'{family_id}.ped')
+    ped_df.to_csv(path,
+                  columns= ['FamilyID', 'IndividualID', 'PaternalID', 'MaternalID', 'Sex', 'Phenotype'],
+                  header= False,
+                  index= False,
+                  sep= '\t',
+                  )
+    return path
+
+
+def _random_source(seed):
+    '''Python's shared random number generator, or a separate one started from seed.'''
+    return random if seed is None else random.Random(seed)
+
+
+def inheritance_weights(p, q):
+    '''
+    Genotype probabilities for passing the alternate allele down a family (forward), and for choosing the
+    parents of someone who married in (reverse). A genotype counts alternate alleles: 0 homozygous reference,
+    1 heterozygous, 2 homozygous alternate. p and q are the reference and alternate allele frequencies.
+
+    Forward, a child's genotype follows Mendel's laws: each parent passes on one of their two alleles at random.
+    Reverse, the parents' genotypes are chosen given their child's by Bayes' theorem. Each pair of parental
+    genotypes is weighted by its Hardy-Weinberg frequency times the chance that it gives the child's genotype,
+    so ancestors chosen this way are in Hardy-Weinberg proportions, as people in the population are.
+    '''
+    hardy_weinberg = {0: p**2, 1: 2*p*q, 2: q**2}
+    passes_alt = {0: 0.0, 1: 0.5, 2: 1.0}  # chance that a parent with this genotype passes on the alternate allele
+
+    forward_genotypes, forward_weights = {}, {}
+    reverse_genotypes = {2: [], 1: [], 0: []}
+    reverse_weights = {2: [], 1: [], 0: []}
+    for paternal in (2, 1, 0):
+        for maternal in (2, 1, 0):
+            a, b = passes_alt[paternal], passes_alt[maternal]
+            child = {2: a*b, 1: a*(1-b) + (1-a)*b, 0: (1-a)*(1-b)}
+            possible = [g for g in (2, 1, 0) if child[g] > 0]
+            #(paternal genotype, maternal genotype) -> [possible child genotypes]
+            forward_genotypes[(paternal, maternal)] = possible
+            forward_weights[(paternal, maternal)] = [child[g] for g in possible]
+            #child genotype -> [possible (paternal, maternal) genotypes]
+            for g in possible:
+                reverse_genotypes[g].append((paternal, maternal))
+                reverse_weights[g].append(hardy_weinberg[paternal] * hardy_weinberg[maternal] * child[g])
+
+    return {
+        'forward_genotypes': forward_genotypes,
+        'forward_weights': forward_weights,
+        'reverse_genotypes': reverse_genotypes,
+        'reverse_weights': reverse_weights,
+    }
