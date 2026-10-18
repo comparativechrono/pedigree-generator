@@ -7,7 +7,7 @@ matplotlib.use('Agg')
 import pytest
 
 from PedGen import construct_pedigree_graph, gen_PED_export, pedigree_generator, plot_pedigree_tree
-from PedGen.core import generation_layout, inheritance_weights
+from PedGen.core import generation_layout, generations, inheritance_weights
 
 
 def hardy_weinberg(q):
@@ -98,15 +98,37 @@ def test_graph_reads_text_ids():
     assert set(G.edges) == {('a', 'c'), ('b', 'c')}
 
 
-def test_generation_layout_puts_partners_in_one_row():
-    df = pedigree_generator(3, 'F', 'AD', 4, BackpropLikelihood=0, seed=3)
+def test_graph_reads_decimal_and_missing_parents():
+    # a parent column with a missing value is read as decimals, so its zeros are 0.0
+    import pandas as pd
+    df = pd.DataFrame({'FamilyID': ['F'] * 4, 'IndividualID': [1, 2, 3, 4], 'PaternalID': [0.0, 0.0, 1.0, float('nan')],
+                       'MaternalID': [0.0, 0.0, 2.0, 0.0], 'Sex': [1, 2, 1, 2], 'Phenotype': [2, 1, 2, 1]})
     G = construct_pedigree_graph(df)
-    pos = generation_layout(G)
-    for child in G.nodes:
-        parents = list(G.predecessors(child))
-        if len(parents) == 2:
-            assert pos[parents[0]][1] == pytest.approx(pos[parents[1]][1])
-            assert pos[child][1] < pos[parents[0]][1]
+    assert set(G.nodes) == {1, 2, 3, 4}
+    assert set(G.edges) == {(1, 3), (2, 3)}
+
+
+def test_generation_layout_puts_partners_in_one_row():
+    # with the ancestors of people who married in drawn too
+    for seed in range(30):
+        df = pedigree_generator(3, 'F', 'AD', 4, BackpropLikelihood=0.5, seed=seed)
+        G = construct_pedigree_graph(df)
+        pos = generation_layout(G)
+        for child in G.nodes:
+            parents = list(G.predecessors(child))
+            if len(parents) == 2:
+                assert pos[parents[0]][1] == pytest.approx(pos[parents[1]][1])
+                assert pos[child][1] == pytest.approx(pos[parents[0]][1] - 1)
+
+
+def test_generations_when_people_of_two_generations_have_children():
+    # 4 has a child with his niece 6: whatever the order of the rows, each child is one generation below its lower parent
+    import pandas as pd
+    rows = [(1, 0, 0, 1), (2, 0, 0, 2), (3, 1, 2, 1), (4, 1, 2, 1), (5, 0, 0, 2), (6, 3, 5, 2), (7, 4, 6, 1)]
+    for order in (rows, rows[::-1], rows[4:] + rows[:4]):
+        df = pd.DataFrame([('F', i, f, m, sex, 1) for i, f, m, sex in order],
+                          columns=['FamilyID', 'IndividualID', 'PaternalID', 'MaternalID', 'Sex', 'Phenotype'])
+        assert generations(construct_pedigree_graph(df)) == {1: 0, 2: 0, 3: 1, 4: 1, 5: 1, 6: 2, 7: 3}
 
 
 def test_plot_without_pygraphviz(monkeypatch):

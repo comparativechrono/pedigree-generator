@@ -1,8 +1,28 @@
 import os
 import random
+from collections import deque
 import pandas as pd
 import matplotlib.pyplot as plt
 import networkx as nx
+
+def no_parent(parent_id):
+    '''
+    Whether a parent ID means that the parent isn't in the pedigree: 0, however it was read (0, 0.0 or '0'), or a missing value
+    '''
+    if parent_id is None:
+        return True
+    try:
+        if pd.isna(parent_id):
+            return True
+    except (TypeError, ValueError):
+        pass
+    text = str(parent_id).strip()
+    if text == '':
+        return True
+    try:
+        return float(text) == 0
+    except ValueError:
+        return False
 
 def construct_pedigree_graph(df):
     G = nx.DiGraph()
@@ -19,28 +39,58 @@ def construct_pedigree_graph(df):
         maternal_id = row['MaternalID']
         individual_id = row['IndividualID']
 
-        # a parent of 0 means unknown, whether it was read as a number or as text
-        if str(paternal_id) != '0':
+        # a parent of 0 means unknown, whether it was read as a whole number, a decimal or text
+        if not no_parent(paternal_id):
             G.add_edge(paternal_id, individual_id)
-        if str(maternal_id) != '0':
+        if not no_parent(maternal_id):
             G.add_edge(maternal_id, individual_id)
 
     return G
 
-def generation_layout(G):
+def generations(G):
     '''
-    Positions for drawing a pedigree graph without Graphviz: one row per generation, the oldest at the top.
-    A person's generation is one below their lower parent. Someone who married in with no parents in the
-    pedigree is drawn in their partner's generation rather than at the top.
+    Each person's generation in a pedigree graph, counting from 0 for the oldest.
+    A child is one generation below its parents, so partners share a generation, and someone who married into the family
+    is in their partner's generation, however many of their own ancestors are drawn. Where that can't hold throughout,
+    as when people of different generations have children together, each child is put one generation below its lower
+    parent, and each person with no parents in the pedigree one generation above their highest child.
     '''
     generation = {}
-    for n in nx.topological_sort(G):
-        parents = list(G.predecessors(n))
-        generation[n] = max(generation[p] for p in parents) + 1 if parents else 0
-    for n in G.nodes:
-        children = list(G.successors(n))
-        if not list(G.predecessors(n)) and children:
-            generation[n] = min(generation[c] for c in children) - 1
+    order = list(nx.topological_sort(G))
+    for component in nx.weakly_connected_components(G):
+        people = [n for n in order if n in component]
+        # spreading out from one person to the whole family, a child one generation below a parent and a parent one above a child
+        level = {people[0]: 0}
+        queue = deque([people[0]])
+        consistent = True
+        while queue:
+            n = queue.popleft()
+            for neighbour, step in [(c, 1) for c in G.successors(n)] + [(p, -1) for p in G.predecessors(n)]:
+                if neighbour not in level:
+                    level[neighbour] = level[n] + step
+                    queue.append(neighbour)
+                elif level[neighbour] != level[n] + step:
+                    consistent = False
+        if not consistent:
+            level = {}
+            for n in people:
+                parents = list(G.predecessors(n))
+                level[n] = max(level[p] for p in parents) + 1 if parents else 0
+            for n in people:
+                children = list(G.successors(n))
+                if not list(G.predecessors(n)) and children:
+                    level[n] = min(level[c] for c in children) - 1
+        oldest = min(level.values())
+        for n, l in level.items():
+            generation[n] = l - oldest
+    return generation
+
+def generation_layout(G):
+    '''
+    Positions for drawing a pedigree graph without Graphviz: one row per generation (see generations()), the oldest at the top,
+    so that partners are drawn side by side.
+    '''
+    generation = generations(G)
     rows = {}
     for n in G.nodes:
         rows.setdefault(generation[n], []).append(n)
