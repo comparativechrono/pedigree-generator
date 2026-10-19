@@ -6,6 +6,7 @@ writes results/FAM2.ped, as pedigree_generator and gen_PED_export do in Python, 
 number of copies of the alternate allele that each person has (gen_genotype_export).
 """
 import argparse
+import re
 import sys
 
 from . import __version__
@@ -65,6 +66,10 @@ def parser():
 
 def main(argv=None):
     args = parser().parse_args(argv)
+    if not args.family or re.search(r'\s', args.family):
+        print(f'pedgen: the family ID {args.family!r} must be a word with no spaces, as PED files are split at spaces',
+              file=sys.stderr)
+        return 1
     df = pedigree_generator(max_children=args.max_children, FamilyID=args.family, mode=args.mode,
                             generation_count=args.generations, SpouseLikelihood=args.partners,
                             AffectedSpouse=not args.unaffected_partners, BackpropLikelihood=args.ancestors,

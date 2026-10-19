@@ -60,6 +60,13 @@ def test_pednet_reads_the_genotypes(tmp_path):
     assert score.id == 'causal' and score.log10_bf == score.log10_bf
 
 
+@pytest.mark.parametrize('family', ['FAM 2', ''])
+def test_family_with_a_space(tmp_path, family, capsys):
+    assert main(['-f', family, '-d', str(tmp_path)]) == 1
+    assert 'must be a word with no spaces' in capsys.readouterr().err
+    assert list(tmp_path.iterdir()) == []
+
+
 @pytest.mark.parametrize('args', [['--partners', '1.5'], ['-g', '0'], ['--mode', 'XL'], ['-c', 'two']])
 def test_bad_arguments(args):
     with pytest.raises(SystemExit) as stop:
