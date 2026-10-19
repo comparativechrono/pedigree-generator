@@ -59,7 +59,7 @@ df = pedigree_generator(max_children=3, FamilyID="AR1", mode="AR", generation_co
                         CousinLikelihood=1.0, min_affected=2, seed=1)
 ```
 
-At an allele frequency of 0.001, about one five-generation family in fifty has a second person affected when cousins marry whenever they can, and almost none when they don't, so `min_affected` may make fifty pedigrees or more before it finds one (about a second). With a commoner allele, such as 0.02 (about the frequency of the alleles that cause cystic fibrosis in northern Europe, where one person in 25 carries one), a recessive condition also turns up again through partners who carry it.
+At an allele frequency of 0.001, with cousins marrying whenever they can, about one family in 35 of five generations has a second person affected, and one in 70 of four generations; when they don't, almost none do. So `min_affected` makes 35 or 70 pedigrees, on average, before it finds one, which takes about a second. With a commoner allele, such as 0.02 (about the frequency of the alleles that cause cystic fibrosis in northern Europe, where one person in 25 carries one), a recessive condition also turns up again through partners who carry it.
 
 The returned DataFrame has one row per person, with the columns FamilyID, IndividualID, PaternalID, MaternalID, Sex (1 male, 2 female), Phenotype (1 unaffected, 2 affected) and Genotype (the number of alternate alleles: 0, 1 or 2).
 
