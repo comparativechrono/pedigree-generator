@@ -1,12 +1,12 @@
 # Pedigree Generation Package
 
-PedGen is a Python package for generating genetically realistic pedigrees. Generated pedigrees can be drawn as directed acyclic graphs and exported as PED files.
+PedGen is a Python package for generating genetically realistic pedigrees. Generated pedigrees can be drawn as directed acyclic graphs and exported as PED files or GA4GH Pedigrees.
 
 Pedigree generation and PED file export are also available in a [Streamlit web app](https://pedigree-generatorgit-kzmzvjzpxmt9yyvnryeq7h.streamlit.app).
 
 ## Installation
 
-All the Python dependencies are installed with the package:
+All the Python dependencies are installed with the package, which needs Python 3.9 or later:
 ```bash
 pip install PedGen
 ```
@@ -68,6 +68,11 @@ The returned DataFrame has one row per person, with the columns FamilyID, Indivi
 - **df** (DataFrame): a pedigree from `pedigree_generator`
 - **output_dir** (string): the folder to write the PED file in, made if it doesn't exist (default: the working directory)
 
+**`gen_GA4GH_export(df, output_dir='.', condition=None)`** writes the generated pedigree as a GA4GH Pedigree named after its family ID (for example `FAM1_ga4gh-pedigree.json`) and returns the file's path. It is the form that [studio2ga4gh](https://github.com/comparativechrono/studio2ga4gh) writes and the lab's other GA4GH tools read, such as ga4gh2studio, phenopacket-toolkit and [PedNet](https://github.com/comparativechrono/PedNet): each person is a Phenopacket, and each parent is joined to their children by a relationship (`KIN:028` for a father, `KIN:027` for a mother). It is written with [pedigree-ga4gh](https://github.com/comparativechrono/pedigree-ga4gh), which is installed with PedGen.
+- **df** (DataFrame): a pedigree from `pedigree_generator`
+- **output_dir** (string): the folder to write the file in, made if it doesn't exist (default: the working directory)
+- **condition** (pair of strings, optional): the condition the pedigree is about, as an ontology term and its label, such as `('MONDO:0007739', 'Huntington disease')`, or an HPO term such as `('HP:0000365', 'Hearing impairment')`, which is written as a phenotype rather than a disease (default: `('MONDO:0000001', 'disease')`, Mondo's most general term, as PedGen simulates no particular one). A GA4GH Pedigree records who is affected only through their conditions, so the affected have it, and the unaffected have it marked as excluded (looked for, and not found), so that their phenotypes can be read back from the file as they are in the PED file. The narrative says how the pedigree was made: the mode of inheritance, the number of generations, the allele frequency and the seed.
+
 **`gen_genotype_export(df, path, alt_freq=None, variant='causal')`** writes the Genotype column, each person's number of copies of the alternate allele, as a table that [PedNet](https://github.com/comparativechrono/PedNet) reads as a candidate variant (`pednet rank FAM1.ped genotypes.tsv`), and returns the path.
 - **df** (DataFrame): a pedigree from `pedigree_generator`
 - **path** (string): the file to write
@@ -88,9 +93,11 @@ Installing PedGen also installs the `pedgen` command, which generates a pedigree
 pedgen --mode AR --generations 4 --family FAM2 --seed 7 -d results     # writes results/FAM2.ped
 pedgen --seed 1 --genotypes FAM1-genotypes.tsv                          # FAM1.ped, and each person's copies of the allele
 pedgen --mode AR --generations 5 --cousins 1 --min-affected 2 --seed 1  # a recessive condition in children of cousins
+pedgen --seed 3 --ga4gh                                                 # FAM1.ped, and FAM1_ga4gh-pedigree.json
+pedgen --mode AD --seed 3 --ga4gh --condition MONDO:0007739 "Huntington disease"
 ```
 
-Its options are `pedigree_generator`'s parameters: `--mode`, `--generations`, `--max-children`, `--family`, `--seed`, `--partners` (SpouseLikelihood), `--ancestors` (BackpropLikelihood), `--allele-frequency` (alt_freq), `--unaffected-partners` (AffectedSpouse = False), `--cousins` (CousinLikelihood) and `--min-affected` (min_affected), with `-d` for the folder to write in and `--genotypes` for the table that `gen_genotype_export` writes. `pedgen --help` lists them, with their defaults.
+Its options are `pedigree_generator`'s parameters: `--mode`, `--generations`, `--max-children`, `--family`, `--seed`, `--partners` (SpouseLikelihood), `--ancestors` (BackpropLikelihood), `--allele-frequency` (alt_freq), `--unaffected-partners` (AffectedSpouse = False), `--cousins` (CousinLikelihood) and `--min-affected` (min_affected), with `-d` for the folder to write in, `--ga4gh` for the GA4GH Pedigree that `gen_GA4GH_export` writes too, with `--condition ID LABEL` for its condition, and `--genotypes` for the table that `gen_genotype_export` writes. `pedgen --help` lists them, with their defaults.
 
 PedGen imports matplotlib only to draw, so generating and exporting pedigrees doesn't need it, and is quicker to start.
 
