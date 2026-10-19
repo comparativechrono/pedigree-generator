@@ -2,8 +2,8 @@ import os
 import random
 from collections import deque
 import pandas as pd
-import matplotlib.pyplot as plt
 import networkx as nx
+#matplotlib is imported only to draw (plot_pedigree_tree), as it is slow to import and isn't needed to generate pedigrees
 
 def no_parent(parent_id):
     '''
@@ -118,6 +118,8 @@ def generation_layout(G):
     return pos
 
 def plot_pedigree_tree(df, title="Pedigree (Tree Layout)"):
+    import matplotlib.pyplot as plt
+
     G = construct_pedigree_graph(df)
     fig_size = (10, 5)
     f = plt.figure(figsize=fig_size)
@@ -391,6 +393,27 @@ def gen_PED_export(ped_df, output_dir='.'):
                   index= False,
                   sep= '\t',
                   )
+    return path
+
+
+def gen_genotype_export(ped_df, path, alt_freq=None, variant='causal'):
+    '''
+    Writes the number of copies of the alternate allele that each person in a generated pedigree has (its Genotype
+    column) as a table that PedNet reads as a candidate variant (pednet rank FAMILY.ped FILE), and returns the path.
+
+    The table has a row for the variant: its name (variant), its chromosome (an autosome, as the modes generated are
+    autosomal), the alternate allele's frequency in the population if alt_freq is given (as given to
+    pedigree_generator), and a column for each person, named by their IndividualID.
+    '''
+    folder = os.path.dirname(str(path))
+    if folder:
+        os.makedirs(folder, exist_ok= True)
+    people = [str(i) for i in ped_df['IndividualID']]
+    copies = [str(int(g)) for g in ped_df['Genotype']]
+    header = ['variant', 'chrom'] + (['af'] if alt_freq is not None else []) + people
+    row = [variant, 'autosome'] + ([repr(float(alt_freq))] if alt_freq is not None else []) + copies
+    with open(path, 'w', encoding= 'utf-8') as handle:
+        handle.write('\t'.join(header) + '\n' + '\t'.join(row) + '\n')
     return path
 
 

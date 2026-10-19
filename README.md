@@ -55,11 +55,30 @@ The returned DataFrame has one row per person, with the columns FamilyID, Indivi
 - **df** (DataFrame): a pedigree from `pedigree_generator`
 - **output_dir** (string): the folder to write the PED file in, made if it doesn't exist (default: the working directory)
 
+**`gen_genotype_export(df, path, alt_freq=None, variant='causal')`** writes the Genotype column, each person's number of copies of the alternate allele, as a table that [PedNet](https://github.com/comparativechrono/PedNet) reads as a candidate variant (`pednet rank FAM1.ped genotypes.tsv`), and returns the path.
+- **df** (DataFrame): a pedigree from `pedigree_generator`
+- **path** (string): the file to write
+- **alt_freq** (float, optional): the alternate allele's frequency, as given to `pedigree_generator`, which the table then records
+- **variant** (string): the name of the variant in the table (default: `causal`)
+
 **`plot_pedigree_tree(df, title="Pedigree (Tree Layout)")`** draws the generated pedigree as a directed graph, with squares for males and circles for females, and affected people in red.
 - **df** (DataFrame): a pedigree from `pedigree_generator`
 - **title** (string): the title to show above the drawing
 
 **`construct_pedigree_graph(df)`** builds a `networkx.DiGraph` of the pedigree, with an edge from each parent to each child, for further analysis.
+
+### From the command line
+
+Installing PedGen also installs the `pedgen` command, which generates a pedigree and writes it as a PED file named after the family:
+
+```bash
+pedgen --mode AR --generations 4 --family FAM2 --seed 7 -d results     # writes results/FAM2.ped
+pedgen --seed 1 --genotypes FAM1-genotypes.tsv                          # FAM1.ped, and each person's copies of the allele
+```
+
+Its options are `pedigree_generator`'s parameters: `--mode`, `--generations`, `--max-children`, `--family`, `--seed`, `--partners` (SpouseLikelihood), `--ancestors` (BackpropLikelihood), `--allele-frequency` (alt_freq) and `--unaffected-partners` (AffectedSpouse = False), with `-d` for the folder to write in and `--genotypes` for the table that `gen_genotype_export` writes. `pedgen --help` lists them, with their defaults.
+
+PedGen imports matplotlib only to draw, so generating and exporting pedigrees doesn't need it, and is quicker to start.
 
 ## Tests
 

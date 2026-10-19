@@ -24,6 +24,9 @@ dependencies = [
     "networkx>=3.0",
 ]
 
+[project.scripts]
+pedgen = "PedGen.cli:main"
+
 [project.optional-dependencies]
 graphviz = ["pygraphviz>=1.10"]
 test = ["pytest"]
