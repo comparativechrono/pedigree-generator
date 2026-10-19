@@ -57,7 +57,8 @@ def parser():
                    help='the frequency of the alternate allele in the population that partners come from '
                         '(default: 0.1)')
     p.add_argument('--unaffected-partners', action='store_true',
-                   help='partners and their ancestors never carry the alternate allele')
+                   help="partners never carry the alternate allele, though their parents and grandparents, if added, "
+                        "still can (--allele-frequency 0 keeps it to the founder's descendants)")
     p.add_argument('--genotypes', metavar='FILE',
                    help="also write each person's copies of the alternate allele to FILE, as a table that PedNet "
                         "reads as a candidate variant (pednet rank FAMILY.ped FILE)")
