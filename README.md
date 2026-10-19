@@ -35,18 +35,31 @@ The main function, `pedigree_generator`, builds a realistic pedigree by Mendelia
 
 ### Pedigree Generation:
 
-**`pedigree_generator(max_children, FamilyID, mode, generation_count, SpouseLikelihood = 0.6, AffectedSpouse = True, BackpropLikelihood = 0.25, alt_freq = 0.1, seed = None)`** returns a DataFrame with the family relationships, sex, phenotype and genotype of everyone in the generated pedigree.
+**`pedigree_generator(max_children, FamilyID, mode, generation_count, SpouseLikelihood = 0.6, AffectedSpouse = True, BackpropLikelihood = 0.25, alt_freq = 0.001, seed = None, CousinLikelihood = 0.0, min_affected = 1)`** returns a DataFrame with the family relationships, sex, phenotype and genotype of everyone in the generated pedigree.
 
 #### **Parameters**
 - **max_children** (int): the maximum number of children for any couple in the pedigree
 - **FamilyID** (string): the family ID given to the generated pedigree
 - **mode** ['AD', 'AR']: the mode of inheritance used to generate the pedigree (AD = autosomal dominant, AR = autosomal recessive)
 - **generation_count** (int): the number of generations in the pedigree
-- **SpouseLikelihood** (float, 0-1): the chance that a partner is generated for each child as the pedigree is built forwards, so that the child has children of their own (default: 0.6). The first child always has a partner, so that the pedigree reaches `generation_count` generations
+- **SpouseLikelihood** (float, 0-1): the chance that a partner is generated for each child as the pedigree is built forwards, so that the child has children of their own (default: 0.6). In every generation but the last, the first child always has a partner, so that the pedigree reaches `generation_count` generations
 - **AffectedSpouse** (bool): whether the generated partners can carry the alternate allele (default: True)
 - **BackpropLikelihood** (float, 0-1): the chance that a partner's parents are generated as the pedigree is built backwards, and their parents in turn (default: 0.25)
-- **alt_freq** (float, 0-1): the frequency of the alternate allele in the population, which partners and their ancestors are drawn from (default: 0.1)
+- **alt_freq** (float, 0-1): the frequency of the alternate allele in the population, which partners and their ancestors are drawn from (default: 0.001, a rare allele, as a rare disease's is). It also sets how likely an affected founder is to have two copies in a dominant pedigree: in the share of affected people who do, so almost never for a rare allele
 - **seed** (int): makes the pedigree reproducible, so that the same seed and settings always give the same pedigree (default: None, which uses Python's shared random number generator)
+- **CousinLikelihood** (float, 0-1): the chance that a descendant of the founder who has a partner marries a cousin rather than someone from outside the family, when a cousin of the other sex has no partner yet (default: 0). The pedigree is built one branch at a time, so the cousins are those in the branches built already, and only those whose own chance of a partner (`SpouseLikelihood`) didn't come up: at a `SpouseLikelihood` of 1, everyone has a partner from outside before a cousin is free, and no cousins marry
+- **min_affected** (int): makes pedigrees until one has at least this many affected people, as families come to notice through their affected members (default: 1). After 1,000 pedigrees without one, which can take half a minute or more, it raises a `ValueError` that says what to change
+
+#### A rare recessive condition
+
+With a rare allele, someone who marries into the family almost never carries it, so a recessive condition seldom turns up again in a family unless relatives marry. That is how it is with rare recessive diseases, and why they are commoner in the children of cousins. So for a recessive pedigree with more than the founder affected, give a chance that cousins marry, four or more generations (the founder's grandchildren are the first cousins), and `min_affected`:
+
+```python
+df = pedigree_generator(max_children=3, FamilyID="AR1", mode="AR", generation_count=5,
+                        CousinLikelihood=1.0, min_affected=2, seed=1)
+```
+
+At an allele frequency of 0.001, with cousins marrying whenever they can, about one family in 40 of five generations has a second person affected, and one in 50 of four generations; when they don't, almost none do. So `min_affected` makes about 40 or 50 pedigrees, on average, before it finds one, which takes about a second. With a commoner allele, such as 0.02 (about the frequency of the alleles that cause cystic fibrosis in northern Europe, where one person in 25 carries one), a recessive condition also turns up again through partners who carry it.
 
 The returned DataFrame has one row per person, with the columns FamilyID, IndividualID, PaternalID, MaternalID, Sex (1 male, 2 female), Phenotype (1 unaffected, 2 affected) and Genotype (the number of alternate alleles: 0, 1 or 2).
 
@@ -74,9 +87,10 @@ Installing PedGen also installs the `pedgen` command, which generates a pedigree
 ```bash
 pedgen --mode AR --generations 4 --family FAM2 --seed 7 -d results     # writes results/FAM2.ped
 pedgen --seed 1 --genotypes FAM1-genotypes.tsv                          # FAM1.ped, and each person's copies of the allele
+pedgen --mode AR --generations 5 --cousins 1 --min-affected 2 --seed 1  # a recessive condition in children of cousins
 ```
 
-Its options are `pedigree_generator`'s parameters: `--mode`, `--generations`, `--max-children`, `--family`, `--seed`, `--partners` (SpouseLikelihood), `--ancestors` (BackpropLikelihood), `--allele-frequency` (alt_freq) and `--unaffected-partners` (AffectedSpouse = False), with `-d` for the folder to write in and `--genotypes` for the table that `gen_genotype_export` writes. `pedgen --help` lists them, with their defaults.
+Its options are `pedigree_generator`'s parameters: `--mode`, `--generations`, `--max-children`, `--family`, `--seed`, `--partners` (SpouseLikelihood), `--ancestors` (BackpropLikelihood), `--allele-frequency` (alt_freq), `--unaffected-partners` (AffectedSpouse = False), `--cousins` (CousinLikelihood) and `--min-affected` (min_affected), with `-d` for the folder to write in and `--genotypes` for the table that `gen_genotype_export` writes. `pedgen --help` lists them, with their defaults.
 
 PedGen imports matplotlib only to draw, so generating and exporting pedigrees doesn't need it, and is quicker to start.
 

@@ -7,7 +7,7 @@ matplotlib.use('Agg')
 import pytest
 
 from PedGen import construct_pedigree_graph, gen_PED_export, pedigree_generator, plot_pedigree_tree
-from PedGen.core import generation_layout, generations, inheritance_weights
+from PedGen.core import affected_founder_weights, generation_layout, generations, inheritance_weights
 
 
 def hardy_weinberg(q):
@@ -68,6 +68,97 @@ def test_generated_pedigrees_are_mendelian(mode):
                 assert df.loc[father, 'Sex'] == 1 and df.loc[mother, 'Sex'] == 2
                 pair = (int(df.loc[father, 'Genotype']), int(df.loc[mother, 'Genotype']))
                 assert g in weights['forward_genotypes'][pair]
+
+
+def test_the_allele_is_rare_unless_said_otherwise():
+    import inspect
+    assert inspect.signature(pedigree_generator).parameters['alt_freq'].default == 0.001
+
+
+def test_an_affected_founder_is_as_people_with_the_allele_are():
+    # a dominant founder is homozygous in the share of affected people who are, q^2 / (q^2 + 2pq): a third at q = 0.5,
+    # and one in 2,000 at the default (it used to be a fifth, whatever the frequency)
+    het, hom = affected_founder_weights(0.5)
+    assert hom / (het + hom) == pytest.approx(1 / 3)
+    het, hom = affected_founder_weights(0.001)
+    assert hom / (het + hom) == pytest.approx(0.001 / 1.999)
+    assert affected_founder_weights(0) == (1, 0) and affected_founder_weights(1) == (0, 1)
+    homozygous = sum(pedigree_generator(1, 'F', 'AD', 1, alt_freq=0.5, seed=s).loc[0, 'Genotype'] == 2 for s in range(900))
+    assert 250 < homozygous < 350
+    assert pedigree_generator(1, 'F', 'AD', 1, alt_freq=0, seed=1).loc[0, 'Genotype'] == 1
+
+
+# what main made before the allele was rare by default: a recessive family at 0.1 is the same, draw for draw, as no
+# random number is drawn for cousins when CousinLikelihood is 0
+SEED_3_AT_0_1 = [[1, 0, 0, 1, 2, 2], [2, 0, 0, 2, 1, 0], [3, 1, 2, 2, 1, 1], [4, 0, 0, 1, 1, 0], [5, 4, 3, 2, 1, 0],
+                 [6, 7, 8, 1, 1, 0], [7, 0, 0, 1, 1, 0], [8, 0, 0, 2, 1, 0], [9, 6, 5, 1, 1, 0], [10, 6, 5, 2, 1, 0],
+                 [11, 6, 5, 1, 1, 0], [12, 1, 2, 1, 1, 1], [13, 0, 0, 2, 1, 0], [14, 12, 13, 2, 1, 0],
+                 [15, 0, 0, 1, 1, 0], [16, 15, 14, 2, 1, 0], [17, 15, 14, 1, 1, 0], [18, 12, 13, 1, 1, 1],
+                 [19, 0, 0, 2, 1, 1], [20, 18, 19, 2, 1, 0], [21, 18, 19, 2, 1, 0], [22, 18, 19, 1, 1, 1]]
+
+
+def test_a_recessive_family_at_the_old_frequency_is_as_before():
+    df = pedigree_generator(3, 'F', 'AR', 4, alt_freq=0.1, seed=3)
+    rows = df[['IndividualID', 'PaternalID', 'MaternalID', 'Sex', 'Phenotype', 'Genotype']].astype(int).values.tolist()
+    assert rows == SEED_3_AT_0_1
+
+
+def ancestors(df, person):
+    parents = df.loc[person, ['PaternalID', 'MaternalID']]
+    found = set()
+    for parent in (int(x) for x in parents if int(x)):
+        found |= {parent} | ancestors(df, parent)
+    return found
+
+
+def generation_of(df, person):
+    # the founder's generation is 0, and their descendants' is one below their parent's in the family
+    if person == 1:
+        return 0
+    father, mother = int(df.loc[person, 'PaternalID']), int(df.loc[person, 'MaternalID'])
+    if not father:
+        return None
+    above = [g for g in (generation_of(df, father), generation_of(df, mother)) if g is not None]
+    return min(above) + 1 if above else None
+
+
+def test_cousins_marry():
+    # with CousinLikelihood=1, a descendant of the founder marries a cousin whenever one is free: a man and a woman of
+    # the same generation who share an ancestor, and are not brother and sister. Each has no other partner, and the
+    # pedigree stays Mendelian.
+    weights = inheritance_weights(0.999, 0.001)
+    cousins = set()
+    for seed in range(30):
+        df = pedigree_generator(3, 'F', 'AR', 5, seed=seed, CousinLikelihood=1.0).set_index('IndividualID')
+        partners = {}
+        for person, row in df.iterrows():
+            father, mother = int(row['PaternalID']), int(row['MaternalID'])
+            if not father:
+                continue
+            assert df.loc[father, 'Sex'] == 1 and df.loc[mother, 'Sex'] == 2
+            assert partners.setdefault(father, mother) == mother and partners.setdefault(mother, father) == father
+            pair = (int(df.loc[father, 'Genotype']), int(df.loc[mother, 'Genotype']))
+            assert int(row['Genotype']) in weights['forward_genotypes'][pair]
+            if ancestors(df, father) & ancestors(df, mother):
+                cousins.add((seed, father, mother))
+                assert generation_of(df, father) == generation_of(df, mother) >= 2
+                assert (df.loc[father, 'PaternalID'], df.loc[father, 'MaternalID']) != \
+                       (df.loc[mother, 'PaternalID'], df.loc[mother, 'MaternalID'])
+    assert len(cousins) >= 5
+    # and with CousinLikelihood=0, no one does
+    for seed in range(30):
+        df = pedigree_generator(3, 'F', 'AR', 5, seed=seed).set_index('IndividualID')
+        assert all(not (ancestors(df, int(r['PaternalID'])) & ancestors(df, int(r['MaternalID'])))
+                   for _, r in df.iterrows() if int(r['PaternalID']))
+
+
+def test_min_affected():
+    df = pedigree_generator(3, 'F', 'AR', 5, seed=1, CousinLikelihood=1.0, min_affected=2)
+    assert (df['Phenotype'] == 2).sum() >= 2
+    assert df.equals(pedigree_generator(3, 'F', 'AR', 5, seed=1, CousinLikelihood=1.0, min_affected=2))
+    # one generation is only the founder
+    with pytest.raises(ValueError, match='none of 1,000 pedigrees had 2 affected people'):
+        pedigree_generator(3, 'F', 'AD', 1, seed=1, min_affected=2)
 
 
 def test_a_seed_makes_the_pedigree_reproducible():
