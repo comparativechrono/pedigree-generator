@@ -1,10 +1,11 @@
+import json
 import subprocess
 import sys
 
 import pandas as pd
 import pytest
 
-from PedGen import gen_genotype_export, pedigree_generator
+from PedGen import gen_GA4GH_export, gen_genotype_export, pedigree_generator
 from PedGen.cli import main
 
 
@@ -26,6 +27,35 @@ def test_the_same_seed_gives_the_same_family(tmp_path):
     for name in ('a', 'b'):
         main(['-s', '3', '-g', '3', '-d', str(tmp_path / name)])
     assert (tmp_path / 'a' / 'FAM1.ped').read_text() == (tmp_path / 'b' / 'FAM1.ped').read_text()
+
+
+def without_times(doc):
+    # a GA4GH file as written, but for when
+    doc = dict(doc, date=None)
+    doc['individuals'] = [dict(i, metaData=dict(i['metaData'], created=None)) for i in doc['individuals']]
+    return doc
+
+
+def test_ga4gh(tmp_path, capsys):
+    # --ga4gh writes a GA4GH Pedigree too, as gen_GA4GH_export does, with the condition given
+    assert main(['-s', '4', '-g', '3', '--ga4gh', '--condition', 'MONDO:0007739', 'Huntington disease',
+                 '-d', str(tmp_path / 'command')]) == 0
+    out = capsys.readouterr().out
+    assert 'FAM1.ped' in out and 'FAM1_ga4gh-pedigree.json' in out
+    doc = json.loads((tmp_path / 'command' / 'FAM1_ga4gh-pedigree.json').read_text())
+    df = pedigree_generator(max_children=3, FamilyID='FAM1', mode='AD', generation_count=3, seed=4)
+    path = gen_GA4GH_export(df, str(tmp_path / 'python'), condition=('MONDO:0007739', 'Huntington disease'))
+    assert without_times(doc) == without_times(json.load(open(path)))
+    assert any(d['term']['id'] == 'MONDO:0007739' for i in doc['individuals'] for d in i.get('diseases', []))
+
+
+def test_condition_errors(tmp_path, capsys):
+    # --condition belongs to --ga4gh, and must be a term a GA4GH file can name; nothing is written otherwise
+    assert main(['--condition', 'MONDO:0007739', 'Huntington disease', '-d', str(tmp_path)]) == 1
+    assert '--ga4gh' in capsys.readouterr().err
+    assert main(['--ga4gh', '--condition', 'Huntington', 'disease', '-d', str(tmp_path)]) == 1
+    assert 'ontology term' in capsys.readouterr().err
+    assert not list(tmp_path.iterdir())
 
 
 def test_as_python_does(tmp_path):

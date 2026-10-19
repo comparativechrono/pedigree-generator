@@ -1,4 +1,5 @@
 import builtins
+import json
 import os
 
 import matplotlib
@@ -6,7 +7,7 @@ matplotlib.use('Agg')
 
 import pytest
 
-from PedGen import construct_pedigree_graph, gen_PED_export, pedigree_generator, plot_pedigree_tree
+from PedGen import construct_pedigree_graph, gen_GA4GH_export, gen_PED_export, pedigree_generator, plot_pedigree_tree
 from PedGen.core import affected_founder_weights, generation_layout, generations, inheritance_weights
 
 
@@ -178,6 +179,47 @@ def test_ped_export(tmp_path):
     for line in lines:
         cols = line.split('\t')
         assert len(cols) == 6 and cols[0] == 'FAM7'
+
+
+def test_ga4gh_export(tmp_path):
+    # the GA4GH Pedigree has everyone, with their sexes and parents, and the condition: had by the affected, and
+    # marked as excluded for the unaffected, so that the PED file's phenotypes come back from it
+    from pedigree_ga4gh import from_ga4gh_pedigree, validate
+    df = pedigree_generator(3, 'FAM3', 'AR', 4, seed=12, CousinLikelihood=1, min_affected=2)
+    path = gen_GA4GH_export(df, str(tmp_path / 'out'))
+    assert path == str(tmp_path / 'out' / 'FAM3_ga4gh-pedigree.json')
+    doc = json.load(open(path))
+    assert doc['id'] == 'FAM3' and len(doc['individuals']) == len(df)
+    assert not [f for f in validate(doc) if f.severity == 'error']
+    kindred, notes = from_ga4gh_pedigree(doc)
+    assert not notes
+    for row in df.itertuples(index=False):
+        person = kindred.member(str(row.IndividualID))
+        father, mother, _ = kindred.genetic_parents(person.id)
+        assert (father or '0', mother or '0') == (str(row.PaternalID), str(row.MaternalID))
+        assert person.sex == {1: 'MALE', 2: 'FEMALE'}[row.Sex]
+        assert [(t.id, t.label, t.excluded) for t in person.terms] == [('MONDO:0000001', 'disease', row.Phenotype == 1)]
+    assert 'autosomal recessive inheritance over 4 generations, allele frequency 0.001, seed 12' in doc['narrative']
+
+
+def test_ga4gh_export_of_a_phenotype(tmp_path):
+    # an HPO term is a phenotype, not a disease
+    df = pedigree_generator(2, 'FAM4', 'AD', 3, seed=5)
+    doc = json.load(open(gen_GA4GH_export(df, str(tmp_path), condition=('hp:0000365', 'Hearing impairment'))))
+    features = [f for i in doc['individuals'] for f in i['phenotypicFeatures']]
+    assert len(features) == len(df) and not any('diseases' in i for i in doc['individuals'])
+    assert all(f['type'] == {'id': 'HP:0000365', 'label': 'Hearing impairment'} for f in features)
+    assert sum(not f.get('excluded') for f in features) == (df['Phenotype'] == 2).sum()
+
+
+@pytest.mark.parametrize('condition', [('Huntington', 'Huntington disease'), ('XYZ:1', 'unknown ontology'),
+                                       ('MONDO:0007739', ' '), 'MONDO:0007739'])
+def test_ga4gh_export_refuses_a_condition_it_cannot_write(tmp_path, condition):
+    # a GA4GH file can only name a condition by a term of an ontology it can declare, with a label
+    df = pedigree_generator(2, 'FAM5', 'AD', 2, seed=1)
+    with pytest.raises(ValueError):
+        gen_GA4GH_export(df, str(tmp_path), condition=condition)
+    assert not list(tmp_path.iterdir())
 
 
 def test_graph_reads_text_ids():
